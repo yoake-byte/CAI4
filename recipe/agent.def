@@ -1,0 +1,16 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%files
+    recipe/requirements.txt /opt/requirements.txt
+
+%post
+    # The build runs as a root-mapped user, so apt must not switch to its own _apt user.
+    apt-get -o APT::Sandbox::User=root update
+    apt-get -o APT::Sandbox::User=root install -y --no-install-recommends \
+        python3 python3-pip ca-certificates
+    pip3 install --no-cache-dir -r /opt/requirements.txt
+    rm -rf /var/lib/apt/lists/*
+
+%labels
+    Purpose Assignment 4 voice agent

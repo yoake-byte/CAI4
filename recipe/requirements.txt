@@ -1,0 +1,7 @@
+# Every package your agent imports, each with a fixed version. This list matches Ubuntu 22.04 and Python 3.10.
+# Replace the ASR and TTS lines if you use other engines. The NVIDIA lines are the CUDA 12 libraries that the
+# faster-whisper engine loads when it runs on the GPU.
+faster-whisper==1.2.1
+piper-tts==1.8.0
+nvidia-cublas-cu12==12.8.4.1
+nvidia-cudnn-cu12==9.10.2.21

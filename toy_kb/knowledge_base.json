@@ -1,0 +1,299 @@
+{
+  "venue": {
+    "name": "Hartwell Community Center",
+    "note": "A made-up place for this assignment. Every answer comes from this file.",
+    "floors": 3
+  },
+  "opening_hours": {
+    "monday": {
+      "open": "07:00",
+      "close": "21:00"
+    },
+    "tuesday": {
+      "open": "07:00",
+      "close": "21:00"
+    },
+    "wednesday": {
+      "open": "07:00",
+      "close": "21:00"
+    },
+    "thursday": {
+      "open": "07:00",
+      "close": "21:00"
+    },
+    "friday": {
+      "open": "07:00",
+      "close": "21:00"
+    },
+    "saturday": {
+      "open": "08:00",
+      "close": "18:00"
+    },
+    "sunday": {
+      "open": "10:00",
+      "close": "16:00"
+    }
+  },
+  "areas": [
+    {
+      "id": "front_desk",
+      "name": "Front desk",
+      "floor": 1,
+      "text": "The front desk is just inside the main door and is staffed whenever the center is open."
+    },
+    {
+      "id": "cafe",
+      "name": "Corner Cup cafe",
+      "floor": 1,
+      "text": "Corner Cup serves coffee and snacks on weekdays from 07:30 to 15:00 and on Saturdays from 08:30 to 14:00. It is closed on Sundays."
+    },
+    {
+      "id": "quiet_lounge",
+      "name": "Quiet lounge",
+      "floor": 2,
+      "text": "The quiet lounge is for reading and solo work. Phone calls are not allowed there."
+    },
+    {
+      "id": "makerspace",
+      "name": "Makerspace",
+      "floor": 3,
+      "text": "The makerspace is open on weekdays from 12:00 to 20:00 only. Tools are loaned for the same day."
+    }
+  ],
+  "services": [
+    {
+      "id": "printing",
+      "name": "Printing",
+      "floor": 2,
+      "text": "The printing station is on the second floor. Black and white pages cost 10 cents and color pages cost 50 cents."
+    },
+    {
+      "id": "lockers",
+      "name": "Day lockers",
+      "floor": 1,
+      "text": "Day lockers are on the first floor and cost 2 dollars per day. A lock is included."
+    },
+    {
+      "id": "laminating",
+      "name": "Laminating",
+      "floor": 1,
+      "text": "Laminating is done at the front desk and costs 1 dollar per page."
+    }
+  ],
+  "policies": [
+    {
+      "id": "guests",
+      "topic": "guests",
+      "text": "A member may bring one guest per visit. The guest signs in at the front desk."
+    },
+    {
+      "id": "children",
+      "topic": "children",
+      "text": "Children under 12 must stay with an adult."
+    },
+    {
+      "id": "laptop_loan",
+      "topic": "laptop loans",
+      "text": "Laptops can be borrowed for 4 hours. The late fee is 5 dollars per hour."
+    },
+    {
+      "id": "room_rules",
+      "topic": "room booking",
+      "text": "Rooms can be booked up to 7 days ahead, for 1 hour at a time. A booking is released if nobody arrives within 10 minutes."
+    }
+  ],
+  "rooms": [
+    {
+      "id": "birch",
+      "name": "Birch Room",
+      "floor": 1,
+      "capacity": 4,
+      "features": [
+        "whiteboard",
+        "tv screen"
+      ],
+      "free_hour_starts": {
+        "monday": [
+          "09:00",
+          "10:00",
+          "15:00"
+        ],
+        "wednesday": [
+          "11:00",
+          "14:00"
+        ],
+        "thursday": [
+          "09:00",
+          "13:00",
+          "16:00"
+        ],
+        "friday": [
+          "10:00",
+          "15:00"
+        ]
+      }
+    },
+    {
+      "id": "cedar",
+      "name": "Cedar Room",
+      "floor": 1,
+      "capacity": 8,
+      "features": [
+        "projector",
+        "whiteboard"
+      ],
+      "free_hour_starts": {
+        "tuesday": [
+          "10:00",
+          "13:00",
+          "14:00"
+        ],
+        "thursday": [
+          "14:00",
+          "15:00"
+        ],
+        "friday": [
+          "09:00",
+          "13:00"
+        ]
+      }
+    },
+    {
+      "id": "elm",
+      "name": "Elm Room",
+      "floor": 2,
+      "capacity": 6,
+      "features": [
+        "whiteboard"
+      ],
+      "free_hour_starts": {
+        "monday": [
+          "13:00",
+          "14:00",
+          "15:00"
+        ],
+        "wednesday": [
+          "09:00",
+          "10:00"
+        ],
+        "thursday": [
+          "10:00",
+          "11:00",
+          "15:00"
+        ]
+      }
+    },
+    {
+      "id": "fir",
+      "name": "Fir Studio",
+      "floor": 2,
+      "capacity": 10,
+      "features": [
+        "projector",
+        "video call kit"
+      ],
+      "free_hour_starts": {
+        "tuesday": [
+          "09:00",
+          "15:00"
+        ],
+        "thursday": [
+          "14:00",
+          "17:00"
+        ],
+        "saturday": [
+          "10:00",
+          "11:00",
+          "12:00"
+        ]
+      }
+    },
+    {
+      "id": "pine",
+      "name": "Pine Room",
+      "floor": 2,
+      "capacity": 4,
+      "features": [
+        "quiet",
+        "whiteboard"
+      ],
+      "free_hour_starts": {
+        "tuesday": [
+          "11:00",
+          "16:00"
+        ],
+        "thursday": [
+          "12:00",
+          "18:00"
+        ],
+        "friday": [
+          "11:00",
+          "14:00"
+        ]
+      }
+    },
+    {
+      "id": "maple",
+      "name": "Maple Hall",
+      "floor": 3,
+      "capacity": 20,
+      "features": [
+        "projector",
+        "microphone",
+        "stage"
+      ],
+      "free_hour_starts": {
+        "wednesday": [
+          "13:00",
+          "14:00",
+          "15:00",
+          "16:00"
+        ],
+        "friday": [
+          "17:00",
+          "18:00"
+        ],
+        "saturday": [
+          "13:00",
+          "14:00"
+        ]
+      }
+    },
+    {
+      "id": "oak",
+      "name": "Oak Nook",
+      "floor": 3,
+      "capacity": 2,
+      "features": [
+        "quiet"
+      ],
+      "free_hour_starts": {
+        "monday": [
+          "12:00",
+          "13:00",
+          "18:00"
+        ],
+        "tuesday": [
+          "12:00",
+          "13:00",
+          "18:00"
+        ],
+        "wednesday": [
+          "12:00",
+          "13:00",
+          "18:00"
+        ],
+        "thursday": [
+          "12:00",
+          "13:00",
+          "18:00"
+        ],
+        "friday": [
+          "12:00",
+          "13:00",
+          "18:00"
+        ]
+      }
+    }
+  ]
+}
