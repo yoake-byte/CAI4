@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
 import re
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Iterator
 
 import numpy as np
+import onnxruntime
 from faster_whisper import WhisperModel
 from piper import PiperVoice
+from piper.config import PiperConfig
 
 from voice_kit import (
     ASR_FINAL,
@@ -20,6 +24,7 @@ from voice_kit import (
     LLM_FIRST_TOKEN,
     ReplaySession,
     record_problems,
+    summarize_stages,
 )
 
 ASR_SAMPLE_RATE_HZ = 16_000
@@ -120,6 +125,18 @@ def speak(voice: PiperVoice, text: str, sink) -> None:
             sink.write(pcm)
 
 
+def speak_worker(voice: PiperVoice, sentences: queue.Queue, sink, errors: list) -> None:
+    """speak each sentence from the queue on its own thread until None arrives."""
+    while True:
+        sentence = sentences.get()
+        if sentence is None:
+            return
+        try:
+            speak(voice, sentence, sink)
+        except Exception as error:  # noqa: BLE001
+            errors.append(error)
+
+
 def generate_reply(
     base_url: str,
     model: str,
@@ -131,22 +148,38 @@ def generate_reply(
     pending = ""
     first_token_seen = False
 
-    for fragment in request_stream(base_url, model, messages):
-        if not first_token_seen and fragment.strip():
-            turn.stamp(LLM_FIRST_TOKEN)
-            first_token_seen = True
-        fragments.append(fragment)
-        pending += fragment
-        sentences, pending = complete_sentences(pending)
-        for sentence in sentences:
-            speak(voice, sentence, turn.sink)
+    # sentences go to a queue; the speaker thread speaks them while the LLM keeps streaming.
+    to_speak: queue.Queue = queue.Queue()
+    speak_errors: list = []
+    speaker = threading.Thread(
+        target=speak_worker, args=(voice, to_speak, turn.sink, speak_errors), daemon=True
+    )
+    speaker.start()
 
-    reply = "".join(fragments).strip()
-    if not first_token_seen or not reply:
-        raise RuntimeError("LLM returned an empty answer.")
-    turn.stamp(LLM_COMPLETE)
-    if pending.strip():
-        speak(voice, pending.strip(), turn.sink)
+    try:
+        for fragment in request_stream(base_url, model, messages):
+            if not first_token_seen and fragment.strip():
+                turn.stamp(LLM_FIRST_TOKEN)
+                first_token_seen = True
+            fragments.append(fragment)
+            pending += fragment
+            sentences, pending = complete_sentences(pending)
+            for sentence in sentences:
+                to_speak.put(sentence)
+
+        reply = "".join(fragments).strip()
+        if not first_token_seen or not reply:
+            raise RuntimeError("LLM returned an empty answer.")
+        turn.stamp(LLM_COMPLETE)
+        if pending.strip():
+            to_speak.put(pending.strip())
+    finally:
+        # Wait until everything queued has been spoken before the turn ends.
+        to_speak.put(None)
+        speaker.join()
+
+    if speak_errors:
+        raise speak_errors[0]
     return reply
 
 
@@ -182,8 +215,21 @@ def run(args: argparse.Namespace) -> None:
         compute_type="float16",
         cpu_threads=args.cpu_count,
         num_workers=1,
+        # load from the shared cache only; never try to reach the Hugging Face website.
+        local_files_only=True,
     )
-    voice = PiperVoice.load(str(args.tts_model))
+    # PiperVoice.load cannot set a thread count, so ONNX Runtime would size itself to the
+    # whole node. Build the voice by hand and give it only the CPUs this job has.
+    options = onnxruntime.SessionOptions()
+    options.intra_op_num_threads = args.cpu_count
+    options.inter_op_num_threads = 1
+    config_path = Path(f"{args.tts_model}.json")
+    voice = PiperVoice(
+        config=PiperConfig.from_dict(json.loads(config_path.read_text(encoding="utf-8"))),
+        session=onnxruntime.InferenceSession(
+            str(args.tts_model), sess_options=options, providers=["CPUExecutionProvider"]
+        ),
+    )
     sample_rate = voice.config.sample_rate
 
     recordings = sorted(args.recordings_directory.glob("*.wav"))
@@ -192,7 +238,8 @@ def run(args: argparse.Namespace) -> None:
 
     # Warm each stage before collecting timed turns.
     transcribe(asr, np.zeros(ASR_SAMPLE_RATE_HZ, dtype="<i2").tobytes())
-    next(iter(voice.synthesize("Ready.")), None)
+    for _ in voice.synthesize("Warming up the voice."):
+        pass
     list(request_stream(args.llm_base_url, args.llm_model, [
         {"role": "user", "content": "Reply with the word ready."}
     ]))
@@ -232,10 +279,21 @@ def run(args: argparse.Namespace) -> None:
             )
             turn.extras["reply"] = reply
             conversation.append((transcript, reply))
+        except Exception as error:  # noqa: BLE001
+            turn.extras["error"] = repr(error)
+            print(f"{turn.turn_id} failed: {error!r}")
         finally:
             turn.finish()
 
     from voice_kit import read_trace
+
+    # print p50 and p95 of every stage over the passing turns
+    records = read_trace(session.trace_path)
+    passing = [record for record in records if not record_problems(record)]
+    print(f"{len(passing)} of {len(records)} turns pass")
+    if passing:
+        for stage, values in summarize_stages(passing).items():
+            print(f"  {stage:>20}: p50 {values['p50_milliseconds']:7.0f} ms   p95 {values['p95_milliseconds']:7.0f} ms")
 
     problems = [
         (record["turn_id"], problem)
