@@ -7,6 +7,7 @@ import json
 import queue
 import re
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -193,9 +194,179 @@ def make_system_prompt(knowledge_base: dict) -> str:
         "only propose rooms whose capacity, features, and free_hour_starts all satisfy the "
         "request. Ask for confirmation before booking, then repeat the room, day, time, and "
         "user's name. Keep answers to one or two short sentences. Preserve relevant context "
-        "from earlier turns.\n\nKnowledge base:\n"
+        "from earlier turns. Say times in words (two in the afternoon, not 14:00) and never use "
+        "lists. When a ROOM CHECK or TIMERS line is given, trust it over your own reading of the "
+        "knowledge base.\n\nKnowledge base:\n"
         + json.dumps(knowledge_base, ensure_ascii=False)
     )
+
+
+# Compute room availability and timer state deterministically and keep in state for LLM to use
+
+DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+FEATURES = {"projector": "projector", "whiteboard": "whiteboard", "tv": "tv screen", "screen": "tv screen",
+            "video call": "video call kit", "microphone": "microphone", "mic": "microphone",
+            "stage": "stage", "quiet": "quiet"}
+NUMBERS = {"forty five": 45, "fifteen": 15, "twelve": 12, "eleven": 11, "ten": 10, "nine": 9, "eight": 8,
+           "seven": 7, "six": 6, "five": 5, "four": 4, "three": 3, "two": 2, "one": 1, "twenty": 20,
+           "thirty": 30, "forty": 40}
+RULE = " Rooms are booked 1 hour at a time; get a yes and a name before booking."
+
+
+def plain(text: str) -> str:
+    """Lowercase, no punctuation, number words as digits."""
+    t = re.sub(r"[^\w\s]", " ", text.lower())
+    t = re.sub(r"\b([ap]) m\b", r"\1m", t)
+    t = t.replace("quietly", "quiet")
+    for word, number in NUMBERS.items():
+        t = re.sub(rf"\b{word}\b", str(number), t)
+    return t
+
+
+def say_hour(hour: int) -> str:
+    return "noon" if hour == 12 else f"{hour % 12} {'am' if hour < 12 else 'pm'}"
+
+
+def read_hour(t: str) -> int | None:
+    """The hour asked for, 24-hour clock. A bare 'at 2' means 2 pm at this venue."""
+    if re.search(r"\bnoon\b", t):          # not "afternoon"
+        return 12
+    m = re.search(r"\b(\d{1,2})\s*(?:(am|pm)|in the (morning|afternoon|evening))", t)
+    if m:
+        return int(m[1]) % 12 + (12 if m[2] == "pm" or m[3] in ("afternoon", "evening") else 0)
+    m = re.search(r"\bat (\d{1,2})\b(?! (?:people|minutes|hours))", t)
+    if m:
+        return int(m[1]) + 12 if 1 <= int(m[1]) <= 6 else int(m[1])
+    return None
+
+
+class Booking:
+    """The current booking request; the newest value of each constraint wins."""
+
+    def __init__(self) -> None:
+        self.active, self.day, self.hour, self.afternoon = False, None, None, False
+        self.people, self.room, self.features, self.equipment_asked = None, None, set(), False
+
+    def update(self, transcript: str, last_reply: str, kb: dict) -> None:
+        t = plain(transcript)
+        mentions = re.search(r"\b(rooms?|book|booking|reserve|hall)\b", t)
+        if mentions and (not self.active or re.match(r"\s*(i need|i want|can i|do you have|a room)", t)):
+            self.__init__()          # a new booking request
+            self.active = True
+        elif not self.active:
+            return
+        elif not mentions and re.search(r"\b(remind|timers?|cost|where|what time does)\b", t):
+            self.__init__()          # the user moved on to something else
+            return
+
+        self.equipment_asked |= "equipment" in last_reply.lower()
+        self.day = next((d for d in DAYS if d in t), self.day)
+        hour = read_hour(t)
+        if hour is not None:
+            self.hour, self.afternoon = hour, False
+        elif "afternoon" in t:
+            self.hour, self.afternoon = None, True
+        m = re.search(r"\b(\d+) (?:people|person)|\bfor (\d+)\b(?! (?:pm|am|in the|minutes|hours))", t)
+        if m:
+            self.people = int(m[1] or m[2])
+        elif re.search(r"\b(just me|only me|myself)\b", t):
+            self.people = 1
+        elif "how many" in last_reply.lower() and re.fullmatch(r"\D*\d+\D*", t):
+            self.people = int(re.search(r"\d+", t)[0])
+        found = {name for word, name in FEATURES.items() if re.search(rf"\b{word}\b", t)}
+        if found:
+            self.features = found if "instead" in t else self.features | found
+        for room in kb["rooms"]:
+            if room["name"].split()[0].lower() in t:
+                self.room = room
+                if room["name"] in last_reply:   # accepting the room we offered as the alternative
+                    self.people = min(self.people or 1, room["capacity"])
+                    self.features &= set(room["features"])
+
+    def check(self, kb: dict) -> str:
+        """Which rooms meet every constraint so far, worked out from the knowledge base."""
+        people = self.people or 1
+        fits = [r for r in ([self.room] if self.room else kb["rooms"])
+                if r["capacity"] >= people and self.features <= set(r["features"])]
+        if not fits:
+            big = [r for r in kb["rooms"] if r["capacity"] >= people]
+            if not big:
+                largest = max(kb["rooms"], key=lambda r: r["capacity"])
+                return (f"No room holds {people}. The largest is {largest['name']}, which holds "
+                        f"{largest['capacity']}. Offer it for a smaller group." + RULE)
+            alt = max(big, key=lambda r: (len(self.features & set(r["features"])), -r["capacity"]))
+            return (f"No room holds {people} and has {', '.join(sorted(self.features))}. Closest: {alt['name']}, "
+                    f"holds {alt['capacity']}, has {', '.join(alt['features'])}. Offer it instead." + RULE)
+        if self.people is None and not self.room:
+            return "Ask how many people." + RULE
+        if not self.features and not self.equipment_asked and not self.room:
+            return "Ask if they need any equipment, like a projector or a whiteboard." + RULE
+        if not self.day or (self.hour is None and not self.afternoon):
+            return f"Rooms that fit: {', '.join(r['name'] for r in fits)}. Ask for the missing day or time." + RULE
+        for r in fits:
+            hours = [int(h[:2]) for h in r["free_hour_starts"].get(self.day, [])]
+            match = [h for h in hours if h == self.hour or (self.afternoon and 12 <= h < 17)]
+            if match:
+                return (f"{r['name']} on floor {r['floor']} is free on {self.day} at {say_hour(match[0])}, holds "
+                        f"{r['capacity']}, has {', '.join(r['features'])}. Propose it." + RULE)
+        free = "; ".join(f"{r['name']}: " + ", ".join(f"{d} at {' and '.join(say_hour(int(h[:2])) for h in hs)}"
+                                                    for d, hs in r["free_hour_starts"].items()) for r in fits)
+        return f"No room that fits is free then. Free times of the rooms that fit: {free}. Offer these." + RULE
+
+    def after_reply(self, reply: str) -> None:
+        if "booked" in reply.lower():
+            self.__init__()
+
+
+class Timers:
+    """Timers kept in code, so 'how long is left' is real arithmetic."""
+
+    def __init__(self) -> None:
+        self.items: dict[str, list[float]] = {}   # label -> [length in seconds, start time]
+        self.last, self.pending, self.recent = None, None, False
+
+    def update(self, transcript: str) -> bool:
+        """Apply a timer request; return True when this turn was about timers."""
+        t = plain(transcript)
+        seconds = sum(int(n) * (3600 if u.startswith("h") else 60) for n, u in re.findall(r"(\d+) (minutes?|hours?)", t))
+        named = (re.search(r"\bfor (?:the |my )?([a-z]+)", t) or re.search(r"\b(?:the|this|my) ([a-z]+) timer\b", t)
+                 or re.search(r"\bleft on the ([a-z]+)", t))
+        label = named[1] if named else self.last
+        asks = re.search(r"\b(timers?|on the clock)\b", t) and "remind" not in t
+        follow_up = self.items and (re.search(r"\b(is left|time left|remaining)\b", t)
+                                    or (self.recent and re.search(r"\b(make it|add|cancel)\b", t)))
+
+        if self.pending and seconds:             # the length for a timer asked for without one
+            self.items[self.pending] = [seconds, time.monotonic()]
+            self.last, self.pending = self.pending, None
+        elif not (asks or follow_up):
+            self.recent, self.pending = False, None
+            return False
+        elif re.search(r"\b(cancel|stop)\b", t):
+            self.items.pop(label, None)
+        elif re.search(r"\b(add|extend)\b", t) and seconds and label in self.items:
+            self.items[label][0] += seconds
+        elif re.search(r"\b(make it|change)\b", t) and label in self.items and re.search(r"\d+", t):
+            self.items[label][0] = seconds or 60 * int(re.search(r"\d+", t)[0])   # keeps the start time
+        elif seconds:
+            for part in t.split(" and "):        # "a 5 minute timer for X and a 2 minute timer for Y"
+                part_seconds = sum(int(n) * (3600 if u.startswith("h") else 60)
+                                   for n, u in re.findall(r"(\d+) (minutes?|hours?)", part))
+                part_label = re.search(r"\bfor (?:the |my )?([a-z]+)", part)
+                if part_seconds:
+                    self.last = part_label[1] if part_label else f"timer {len(self.items) + 1}"
+                    self.items[self.last] = [part_seconds, time.monotonic()]
+        elif asks and not follow_up:
+            self.pending = label or "timer"      # no length given: the LLM should ask for one
+        self.recent = True
+        return True
+
+    def summary(self) -> str:
+        if self.pending:
+            return f"A timer for {self.pending} needs a length: ask how long."
+        now = time.monotonic()
+        return "; ".join(f"{label}: {round(n / 60)} minute timer, about {max(0, round((n - (now - start)) / 60))} minutes left"
+                         for label, (n, start) in self.items.items()) or "No timers are running."
 
 
 def run(args: argparse.Namespace) -> None:
@@ -251,6 +422,7 @@ def run(args: argparse.Namespace) -> None:
     )
     messages = [{"role": "system", "content": make_system_prompt(knowledge_base)}]
     conversation: list[tuple[str, str]] = []
+    booking, timers = Booking(), Timers()
 
     for turn in session.turns():
         try:
@@ -269,7 +441,13 @@ def run(args: argparse.Namespace) -> None:
                 for pair in conversation[-8:]
                 for role, content in (("user", pair[0]), ("assistant", pair[1]))
             ]
-            turn_messages.append({"role": "user", "content": transcript})
+            # Facts worked out in code for this turn, added to this user message only.
+            booking.update(transcript, conversation[-1][1] if conversation else "", knowledge_base)
+            facts = ["ROOM CHECK: " + booking.check(knowledge_base)] if booking.active else []
+            if timers.update(transcript):
+                facts.append("TIMERS: " + timers.summary())
+            turn.extras["facts"] = facts
+            turn_messages.append({"role": "user", "content": "\n\n".join([transcript] + facts)})
             reply = generate_reply(
                 args.llm_base_url,
                 args.llm_model,
@@ -279,6 +457,7 @@ def run(args: argparse.Namespace) -> None:
             )
             turn.extras["reply"] = reply
             conversation.append((transcript, reply))
+            booking.after_reply(reply)
         except Exception as error:  # noqa: BLE001
             turn.extras["error"] = repr(error)
             print(f"{turn.turn_id} failed: {error!r}")
