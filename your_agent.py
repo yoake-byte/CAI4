@@ -196,7 +196,7 @@ def make_system_prompt(knowledge_base: dict) -> str:
         "user's name. Keep answers to one or two short sentences. Preserve relevant context "
         "from earlier turns. Say times in words (two in the afternoon, not 14:00) and never use "
         "lists. When a ROOM CHECK or TIMERS line is given, trust it over your own reading of the "
-        "knowledge base.\n\nKnowledge base:\n"
+        "knowledge base, and never read those lines out.\n\nKnowledge base:\n"
         + json.dumps(knowledge_base, ensure_ascii=False)
     )
 
@@ -210,7 +210,8 @@ FEATURES = {"projector": "projector", "whiteboard": "whiteboard", "tv": "tv scre
 NUMBERS = {"forty five": 45, "fifteen": 15, "twelve": 12, "eleven": 11, "ten": 10, "nine": 9, "eight": 8,
            "seven": 7, "six": 6, "five": 5, "four": 4, "three": 3, "two": 2, "one": 1, "twenty": 20,
            "thirty": 30, "forty": 40}
-RULE = " Rooms are booked 1 hour at a time; get a yes and a name before booking."
+NOT_NAMES = {"the", "a", "an", "me", "us", "it", "my", "our", "just", "only", "now", "today", "tonight",
+             "tomorrow", "noon", "people", "person", "everyone", "please", "that", "this"}
 
 
 def plain(text: str) -> str:
@@ -246,9 +247,12 @@ class Booking:
     def __init__(self) -> None:
         self.active, self.day, self.hour, self.afternoon = False, None, None, False
         self.people, self.room, self.features, self.equipment_asked = None, None, set(), False
+        self.proposed, self.confirmed, self.name, self.done, self.long = False, False, None, False, False
 
     def update(self, transcript: str, last_reply: str, kb: dict) -> None:
         t = plain(transcript)
+        if self.done:                # the last turn finished a booking
+            self.__init__()
         mentions = re.search(r"\b(rooms?|book|booking|reserve|hall)\b", t)
         if mentions and (not self.active or re.match(r"\s*(i need|i want|can i|do you have|a room)", t)):
             self.__init__()          # a new booking request
@@ -260,6 +264,14 @@ class Booking:
             return
 
         self.equipment_asked |= "equipment" in last_reply.lower()
+        self.long = bool(re.search(r"\b([2-9]|\d\d) hours\b", t))
+        if self.proposed:            # a room was proposed: listen for a yes and a name
+            self.confirmed |= bool(re.search(r"\b(yes|yeah|yep|sure|ok|okay|go ahead|book it|fine)\b", t))
+            m = re.search(r"\b(?:name(?: is)?|under|for)\s+(?:the name\s+)?([A-Za-z]+)", transcript, re.I)
+            if m and m[1].lower() not in NOT_NAMES and m[1].lower() not in NUMBERS and m[1].lower() not in DAYS:
+                self.name = m[1][0].upper() + m[1][1:]
+            elif self.confirmed and "name" in last_reply.lower() and re.fullmatch(r"\W*([A-Za-z]+)\W*", transcript):
+                self.name = re.search(r"[A-Za-z]+", transcript)[0].title()
         self.day = next((d for d in DAYS if d in t), self.day)
         hour = read_hour(t)
         if hour is not None:
@@ -286,6 +298,7 @@ class Booking:
     def check(self, kb: dict) -> str:
         """Which rooms meet every constraint so far, worked out from the knowledge base."""
         people = self.people or 1
+        note = " Say that rooms can only be booked for 1 hour at a time." if self.long else ""
         fits = [r for r in ([self.room] if self.room else kb["rooms"])
                 if r["capacity"] >= people and self.features <= set(r["features"])]
         if not fits:
@@ -293,29 +306,44 @@ class Booking:
             if not big:
                 largest = max(kb["rooms"], key=lambda r: r["capacity"])
                 return (f"No room holds {people}. The largest is {largest['name']}, which holds "
-                        f"{largest['capacity']}. Offer it for a smaller group." + RULE)
+                        f"{largest['capacity']}. Offer it for a smaller group." + note)
+            # Fix 5: say what the alternative lacks, and when it is free on the day asked for.
             alt = max(big, key=lambda r: (len(self.features & set(r["features"])), -r["capacity"]))
+            missing = ", ".join(sorted(self.features - set(alt["features"])))
+            when = ""
+            if self.day:
+                hours = alt["free_hour_starts"].get(self.day)
+                when = (f" It is free on {self.day} at {', '.join(say_hour(int(h[:2])) for h in hours)}." if hours
+                        else f" It is not free on {self.day}; it is free on {', '.join(alt['free_hour_starts'])}.")
             return (f"No room holds {people} and has {', '.join(sorted(self.features))}. Closest: {alt['name']}, "
-                    f"holds {alt['capacity']}, has {', '.join(alt['features'])}. Offer it instead." + RULE)
+                    f"holds {alt['capacity']}, but has no {missing}.{when} Offer it instead." + note)
+        # Fix 4: while asking, the LLM must not name a room (it named a wrong one).
         if self.people is None and not self.room:
-            return "Ask how many people." + RULE
+            return "Ask how many people. Do not name a room yet." + note
         if not self.features and not self.equipment_asked and not self.room:
-            return "Ask if they need any equipment, like a projector or a whiteboard." + RULE
+            return "Ask if they need any equipment, like a projector or a whiteboard. Do not name a room yet." + note
         if not self.day or (self.hour is None and not self.afternoon):
-            return f"Rooms that fit: {', '.join(r['name'] for r in fits)}. Ask for the missing day or time." + RULE
+            return f"Rooms that fit: {', '.join(r['name'] for r in fits)}. Ask for the missing day or time." + note
         for r in fits:
             hours = [int(h[:2]) for h in r["free_hour_starts"].get(self.day, [])]
             match = [h for h in hours if h == self.hour or (self.afternoon and 12 <= h < 17)]
             if match:
-                return (f"{r['name']} on floor {r['floor']} is free on {self.day} at {say_hour(match[0])}, holds "
-                        f"{r['capacity']}, has {', '.join(r['features'])}. Propose it." + RULE)
-        free = "; ".join(f"{r['name']}: " + ", ".join(f"{d} at {' and '.join(say_hour(int(h[:2])) for h in hs)}"
-                                                    for d, hs in r["free_hour_starts"].items()) for r in fits)
-        return f"No room that fits is free then. Free times of the rooms that fit: {free}. Offer these." + RULE
-
-    def after_reply(self, reply: str) -> None:
-        if "booked" in reply.lower():
-            self.__init__()
+                when = f"{self.day.title()} at {say_hour(match[0])}"
+                if self.confirmed and self.name:
+                    self.done = True
+                    return f"The user confirmed. Say: Booked. {r['name']}, {when}, for {self.name}." + note
+                if self.confirmed:
+                    return f"The user said yes to {r['name']}, {when}. Ask for the name to book it under." + note
+                self.proposed = True
+                return (f"{r['name']} on floor {r['floor']} is free on {when}, holds {r['capacity']}, has "
+                        f"{', '.join(r['features'])}. Propose it and ask if they want to book it." + note)
+        # Nothing free then: other times that day if there are any, otherwise the days each room is free.
+        same_day = {r["name"]: r["free_hour_starts"][self.day] for r in fits if r["free_hour_starts"].get(self.day)}
+        if same_day:
+            free = "; ".join(f"{name} at {', '.join(say_hour(int(h[:2])) for h in hours)}" for name, hours in same_day.items())
+            return f"No room that fits is free then. Free on {self.day}: {free}. Offer these." + note
+        free = "; ".join(f"{r['name']} on {', '.join(r['free_hour_starts'])}" for r in fits)
+        return f"No room that fits is free on {self.day}. {free}. Offer one of those days." + note
 
 
 class Timers:
@@ -324,10 +352,12 @@ class Timers:
     def __init__(self) -> None:
         self.items: dict[str, list[float]] = {}   # label -> [length in seconds, start time]
         self.last, self.pending, self.recent = None, None, False
+        self.focus, self.cancelled = [], None     # what this turn's TIMERS line talks about
 
     def update(self, transcript: str) -> bool:
         """Apply a timer request; return True when this turn was about timers."""
         t = plain(transcript)
+        self.focus, self.cancelled = [], None
         seconds = sum(int(n) * (3600 if u.startswith("h") else 60) for n, u in re.findall(r"(\d+) (minutes?|hours?)", t))
         named = (re.search(r"\bfor (?:the |my )?([a-z]+)", t) or re.search(r"\b(?:the|this|my) ([a-z]+) timer\b", t)
                  or re.search(r"\bleft on the ([a-z]+)", t))
@@ -339,15 +369,19 @@ class Timers:
         if self.pending and seconds:             # the length for a timer asked for without one
             self.items[self.pending] = [seconds, time.monotonic()]
             self.last, self.pending = self.pending, None
+            self.focus = [self.last]
         elif not (asks or follow_up):
             self.recent, self.pending = False, None
             return False
         elif re.search(r"\b(cancel|stop)\b", t):
-            self.items.pop(label, None)
+            if self.items.pop(label, None) is not None:
+                self.cancelled = label
         elif re.search(r"\b(add|extend)\b", t) and seconds and label in self.items:
             self.items[label][0] += seconds
+            self.focus = [label]
         elif re.search(r"\b(make it|change)\b", t) and label in self.items and re.search(r"\d+", t):
             self.items[label][0] = seconds or 60 * int(re.search(r"\d+", t)[0])   # keeps the start time
+            self.focus = [label]
         elif seconds:
             for part in t.split(" and "):        # "a 5 minute timer for X and a 2 minute timer for Y"
                 part_seconds = sum(int(n) * (3600 if u.startswith("h") else 60)
@@ -356,8 +390,13 @@ class Timers:
                 if part_seconds:
                     self.last = part_label[1] if part_label else f"timer {len(self.items) + 1}"
                     self.items[self.last] = [part_seconds, time.monotonic()]
-        elif asks and not follow_up:
+                    self.focus.append(self.last)
+        elif asks and not follow_up and not re.search(r"\b(what|which|list)\b", t):
             self.pending = label or "timer"      # no length given: the LLM should ask for one
+        elif re.search(r"\b(what|which|list)\b", t) and not follow_up:
+            self.focus = list(self.items)        # "what timers do I have?"
+        else:                                    # "how long is left (on the laundry)?"
+            self.focus = [label] if label in self.items else list(self.items)
         self.recent = True
         return True
 
@@ -365,8 +404,15 @@ class Timers:
         if self.pending:
             return f"A timer for {self.pending} needs a length: ask how long."
         now = time.monotonic()
-        return "; ".join(f"{label}: {round(n / 60)} minute timer, about {max(0, round((n - (now - start)) / 60))} minutes left"
-                         for label, (n, start) in self.items.items()) or "No timers are running."
+        parts = [f"The {self.cancelled} timer is cancelled."] if self.cancelled else []
+        for label in self.focus:
+            length, start = self.items[label]
+            left = max(0, round((length - (now - start)) / 60))
+            name = "The timer" if label.startswith("timer ") else f"The {label} timer"
+            parts.append(f"{name} is set for {round(length / 60)} minutes and has about {left} minutes left.")
+        if self.items and not self.focus and not self.cancelled:
+            parts.append(f"Timers running: {', '.join(self.items)}.")
+        return " ".join(parts) or "No timers are running."
 
 
 def run(args: argparse.Namespace) -> None:
@@ -457,7 +503,6 @@ def run(args: argparse.Namespace) -> None:
             )
             turn.extras["reply"] = reply
             conversation.append((transcript, reply))
-            booking.after_reply(reply)
         except Exception as error:  # noqa: BLE001
             turn.extras["error"] = repr(error)
             print(f"{turn.turn_id} failed: {error!r}")
