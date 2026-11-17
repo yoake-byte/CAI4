@@ -1,0 +1,31 @@
+---------------------------------------
+Begin Slurm Prolog: Nov-16-2026 23:16:53
+Job ID:    7128531
+User ID:   asaha66
+Account:   cse
+Job name:  a4-agent
+Partition: coe-gpu
+QOS:       coe-ice
+---------------------------------------
+node: atl1-1-03-010-20-0.pace.gatech.edu  model: meta-llama/Llama-3.2-3B-Instruct  cpus: 8
+GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-2ba68aca-b2d6-5a08-4203-f6199f8e9c6f)
+LLM server ready on port 28531
+61 of 61 turns pass
+                   asr: p50      43 ms   p95      56 ms
+             llm_start: p50      20 ms   p95      36 ms
+          speech_start: p50     137 ms   p95     224 ms
+         llm_remaining: p50     107 ms   p95     274 ms
+   time_to_first_audio: p50     208 ms   p95     294 ms
+Processed 61 turns; trace: /work/run_output/7128531/trace.jsonl
+---------------------------------------
+Begin Slurm Epilog: Nov-16-2026 23:27:18
+Job ID:        7128531
+User ID:       asaha66
+Account:       cse
+Job name:      a4-agent
+Resources:     cpu=8,gres/gpu:h100=1,mem=64G,node=1
+Rsrc Used:     cput=01:23:44,vmem=0,walltime=00:10:28,mem=7582220K,energy_used=0
+Partition:     coe-gpu
+QOS:           coe-ice
+Nodes:         atl1-1-03-010-20-0
+---------------------------------------
