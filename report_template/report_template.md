@@ -81,13 +81,13 @@ Then the reason for taking too much time between LLM first token and TTS is that
 
 **The fix I would ship next:** [one change, and the effect you expect on the p50, with the reasoning] 
 
-[TODO]maybe change the max length of complete sentences (buffering text). 
 
+Modify the boundary definition of sentence so it triggers the TTS on commas and semicolons as well. This can further reduce the time before starting the first tts speech and p50 decreases, because we observed LLM tends to use long compound sentences.
  
 
 **One thing I tried that did not help:** [what, and what it showed] 
+[TODO, test further] We set max lengths of buffering text, but it broke the natural rhythm and intonation, generating very unnatural audio responses. 
 
- [TODO] needs test modify the boundary definition of sentence.
 ## 5. Reproducing this
 
 > What a stranger types, from a clean clone or the unzipped submission, on PACE-ICE: image build, `sbatch` command, where the trace appears. Name the seeds and where the dependency versions are pinned. The reproduction should finish within 15 minutes of the models loading.
