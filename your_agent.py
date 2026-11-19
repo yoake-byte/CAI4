@@ -341,6 +341,7 @@ class Booking:
         self.active, self.day, self.hour, self.afternoon = False, None, None, False
         self.people, self.room, self.features, self.equipment_asked = None, None, set(), False
         self.proposed, self.confirmed, self.name, self.done, self.long = False, False, None, False, False
+        self.hours = None
         self.late = False
         self.verified_reply: str | None = None
 
@@ -363,6 +364,8 @@ class Booking:
         )
         self.equipment_asked |= "equipment" in last_reply.lower()
         self.long = bool(re.search(r"\b([2-9]|\d\d) hours\b", t))
+        duration_match = re.search(r"\b(\d+) hours?\b", t)
+        self.hours = int(duration_match[1]) if duration_match else None
         self.late = bool(re.search(r"\b(late|run late|running late|tardy|ten minutes)\b", t))
         if self.proposed:            # a room was proposed: listen for a yes and a name
             self.confirmed |= bool(re.search(r"\b(yes|yeah|yep|sure|ok|okay|go ahead|book it|fine)\b", t))
@@ -490,9 +493,14 @@ class Booking:
             if match:
                 when = f"{self.day.title()} at {say_hour(match[0])}"
                 if self.long:
+                    duration = (
+                        f"{self.hours} {'hour' if self.hours == 1 else 'hours'}"
+                        if self.hours is not None else "that length"
+                    )
                     self.verified_reply = (
                         "Rooms can only be booked for one hour at a time. "
-                        "I cannot book it for three hours. Would you like to book a one-hour slot instead?"
+                        f"I cannot book it for {duration}. "
+                        "Would you like to book a one-hour slot instead?"
                     )
                     return (
                         f"{r['name']} is available for one-hour bookings only. "
