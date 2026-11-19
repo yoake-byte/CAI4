@@ -10,7 +10,7 @@
 
 The pipeline is ASR → LLM → TTS. 
 
-The LLM streams its response, and completed sentences are queued to Piper’s voice on CPU while generation continues. ASR waits for the full utterance, and TTS starts once the first complete sentence is available. We manage to reduce latency by buffering LLM text and sending the sentence to Piper when sentence boundary detected, which can begin speaking while the LLM continues generating. Before timing, the agent warms up ASR, TTS, and the LLM with a dummy synthesized audio and asks the LLM for a short “ready” response, so the initialization is outside the measured turns. 
+The LLM streams its response, and completed sentences are queued to Piper’s voice on CPU while generation continues. ASR waits for the full utterance, and TTS starts once the first complete sentence is available. We manage to reduce latency by buffering LLM text and sending the sentence to Piper when sentence boundary detected, which can begin speaking while the LLM continues generating. Before timing, the agent warms up ASR, TTS, and the LLM (ASR: 1s silence, TTS: a dummy synthesized audio, LLM: a short “ready” response), so the initialization is outside the measured turns. 
 
  
 ## 2. The latency waterfall
@@ -53,12 +53,20 @@ On these recordings, ASR handled Yu’s voice worse, especially words like "the"
 
  In Yu Wang 's recording: 
 
+    #Example ("the")
+    
     said : what time does the makerspace open today 
-
+    
     heard: what time does the makerspace open the day 
+    
+    #Example (name)
+    
+    said :yes for alex
+    
+    heard: yes forever
 
 
-The reason might be the accent and the speed of speaking. "to" in "today" sounds very light and fast, so ASR transcribed incorrectly. 
+The reason might be the accent and the speed of speaking. "to" in "today" sounds very light and fast, so ASR transcribed incorrectly. Names do not have grammar pattern or content relation with others and ASR can only rely on acoustic information, accents makes it hard to recognize correctly.
 
 
 ## 4. The bottleneck
@@ -66,14 +74,14 @@ The reason might be the accent and the speed of speaking. "to" in "today" sounds
 **The dominant stage:**
 
 
-Speech start stage takes the largest share, TTFA(p50) = 212. Its own p50 is 145, and its share of the total is 145/212 = 0.684
+Speech start stage takes the largest share, TTFA(p50) = 212ms. Its own p50 is 145ms, and its share of the total is 145/212 = 0.684
 
 
 **Why:**
 
 For the same run, we also measured p50 and p95 for other stages (45 ms for ASR and 20 ms for LLM start), so both speech recognition and LLM initialization are completed in a short time. Also we have observed shorter response took shorter time than longer response. For example, speech start time of the response "Booked." is 45ms, but a longer response listing available rooms does not start speech until 200ms. 
 
-Then the reason for taking too much time between LLM first token and TTS is that LLM is generating response tokens one by one like we usually observe. 
+Then the reason for taking too much time between LLM first token and TTS is that LLM is generating response tokens one by one and Piper's CPU synthesis time scaling with sentence length. 
  
 
 **The fix I would ship next:** 
@@ -82,7 +90,7 @@ Modify the boundary definition of sentence so it triggers the TTS on commas and 
  
 
 **One thing I tried that did not help:** 
-We set max length of buffering text, when the max length set is large, it does not change p50 or p90 too much, but when the meax length set is small, it breaks the natural rhythm and intonation, generating very unnatural audio responses. (like peo-ple, w-ant) 
+We set max length of buffering text, when the max length set is large, it does not change p50 or p95 too much, but when the max length set is small, it breaks the natural rhythm and intonation, generating very unnatural audio responses. (like peo-ple, w-ant) 
 
 ## 5. Reproducing this
 
