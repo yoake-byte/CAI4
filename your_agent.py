@@ -224,6 +224,17 @@ def plain(text: str) -> str:
     return t
 
 
+def starts_new_booking_request(transcript: str) -> bool:
+    t = plain(transcript)
+    starts_request = re.match(
+        r"\s*(?:i need|i want|can i|could i|do you have|a room|book|reserve)\b", t
+    )
+    mentions_room = re.search(
+        r"\b(?:room|rooms|hall|maple|cedar|elm|fir|pine|oak|birch)\b", t
+    )
+    return bool(starts_request and mentions_room)
+
+
 def say_hour(hour: int) -> str:
     return "noon" if hour == 12 else f"{hour % 12} {'am' if hour < 12 else 'pm'}"
 
@@ -481,6 +492,10 @@ def run(args: argparse.Namespace) -> None:
                 raise RuntimeError(f"No speech recognized in {turn.recording.wav_path.name}")
             turn.stamp(ASR_FINAL)
             turn.extras["transcript"] = transcript
+
+            if conversation and starts_new_booking_request(transcript):
+                conversation.clear()
+                booking = Booking()
 
             turn_messages = messages + [
                 {"role": role, "content": content}
