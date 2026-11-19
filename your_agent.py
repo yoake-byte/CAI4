@@ -254,7 +254,7 @@ NUMBERS = {"forty five": 45, "fifteen": 15, "twelve": 12, "eleven": 11, "ten": 1
            "seven": 7, "six": 6, "five": 5, "four": 4, "three": 3, "two": 2, "one": 1, "twenty": 20,
            "thirty": 30, "forty": 40}
 NOT_NAMES = {"the", "a", "an", "me", "us", "it", "my", "our", "just", "only", "now", "today", "tonight",
-             "tomorrow", "noon", "people", "person", "everyone", "please", "that", "this"}
+             "tomorrow", "noon", "people", "person", "everyone", "please", "that", "this", "forever"}
 
 
 def plain(text: str) -> str:
@@ -341,6 +341,7 @@ class Booking:
         self.active, self.day, self.hour, self.afternoon = False, None, None, False
         self.people, self.room, self.features, self.equipment_asked = None, None, set(), False
         self.proposed, self.confirmed, self.name, self.done, self.long = False, False, None, False, False
+        self.late = False
         self.verified_reply: str | None = None
 
     def update(self, transcript: str, last_reply: str, kb: dict) -> None:
@@ -362,6 +363,7 @@ class Booking:
         )
         self.equipment_asked |= "equipment" in last_reply.lower()
         self.long = bool(re.search(r"\b([2-9]|\d\d) hours\b", t))
+        self.late = bool(re.search(r"\b(late|run late|running late|tardy|ten minutes)\b", t))
         if self.proposed:            # a room was proposed: listen for a yes and a name
             self.confirmed |= bool(re.search(r"\b(yes|yeah|yep|sure|ok|okay|go ahead|book it|fine)\b", t))
             m = re.search(r"\b(?:name(?: is)?|under|for)\s+(?:the name\s+)?([A-Za-z]+)", transcript, re.I)
@@ -473,22 +475,60 @@ class Booking:
                     f"holds {alt['capacity']}, but has no {missing}.{when} Offer it instead." + note)
         # Fix 4: while asking, the LLM must not name a room (it named a wrong one).
         if self.people is None and not self.room:
+            self.verified_reply = "How many people will attend?"
             return "Ask how many people. Do not name a room yet." + note
         if not self.features and not self.equipment_asked and not self.room:
+            self.verified_reply = "Do you need any equipment, such as a projector or a whiteboard?"
             return "Ask if they need any equipment, like a projector or a whiteboard. Do not name a room yet." + note
         if not self.day or (self.hour is None and not self.afternoon):
+            missing = "day" if not self.day else "time"
+            self.verified_reply = f"Which {missing} would you like to book the room?"
             return f"Rooms that fit: {', '.join(r['name'] for r in fits)}. Ask for the missing day or time." + note
         for r in fits:
             hours = [int(h[:2]) for h in r["free_hour_starts"].get(self.day, [])]
             match = [h for h in hours if h == self.hour or (self.afternoon and 12 <= h < 17)]
             if match:
                 when = f"{self.day.title()} at {say_hour(match[0])}"
+                if self.long:
+                    self.verified_reply = (
+                        "Rooms can only be booked for one hour at a time. "
+                        "I cannot book it for three hours. Would you like to book a one-hour slot instead?"
+                    )
+                    return (
+                        f"{r['name']} is available for one-hour bookings only. "
+                        "Do not book three hours. Ask whether they want one hour instead."
+                    )
                 if self.confirmed and self.name:
                     self.done = True
-                    return f"The user confirmed. Say: Booked. {r['name']}, {when}, for {self.name}." + note
+                    party = (
+                        f"{people} {'person' if people == 1 else 'people'}"
+                        if self.people is not None else ""
+                    )
+                    feature_text = (
+                        f"{natural_join([('quiet room' if feature == 'quiet' else f'a room with {feature}') for feature in sorted(self.features)])}"
+                        if self.features else ""
+                    )
+                    requirement_parts = [value for value in (party, feature_text) if value]
+                    requirement_text = natural_join(requirement_parts)
+                    confirmation = (
+                        f"Booked. {r['name']} on floor {r['floor']}, {when}"
+                        + (f", for {requirement_text}" if requirement_text else "")
+                        + f", under the name {self.name}."
+                    )
+                    if self.late:
+                        confirmation += " If nobody arrives within 10 minutes, the booking is released."
+                    self.verified_reply = confirmation
+                    return f"The user confirmed. Say: {confirmation}" + note
                 if self.confirmed:
+                    self.verified_reply = f"What name should I put on the booking for {r['name']}?"
                     return f"The user said yes to {r['name']}, {when}. Ask for the name to book it under." + note
                 self.proposed = True
+                party = f" It holds {r['capacity']} people." if people <= r["capacity"] else ""
+                room_features = natural_join([f"a {feature}" if feature != "quiet" else "quiet" for feature in sorted(r["features"])])
+                self.verified_reply = (
+                    f"{r['name']} on floor {r['floor']} is free on {when}.{party} "
+                    f"It has {room_features}. Would you like to book it?"
+                )
                 return (f"{r['name']} on floor {r['floor']} is free on {when}, holds {r['capacity']}, has "
                         f"{', '.join(r['features'])}. Propose it and ask if they want to book it." + note)
         # Nothing free then: other times that day if there are any, otherwise the days each room is free.
