@@ -772,18 +772,22 @@ def run(args: argparse.Namespace) -> None:
                     "content": booking_instruction + "\n" + room_check
                     + (f"\nVERIFIED SPOKEN RESPONSE: {booking.verified_reply}" if booking.verified_reply else ""),
                 })
-            if timers.update(transcript):
+            timer_turn = timers.update(transcript)
+            if timer_turn:
                 facts.append("TIMERS: " + timers.summary())
             turn.extras["facts"] = facts
             timer_facts = [fact for fact in facts if fact.startswith("TIMERS: ")]
             turn_messages.append({"role": "user", "content": "\n\n".join([transcript] + timer_facts)})
+            verified_reply = booking.verified_reply if booking.active else None
+            if timer_turn and len(timers.focus) > 1:
+                verified_reply = timers.summary()
             reply = generate_reply(
                 args.llm_base_url,
                 args.llm_model,
                 turn_messages,
                 voice,
                 turn,
-                verified_reply=booking.verified_reply if booking.active else None,
+                verified_reply=verified_reply,
             )
             turn.extras["reply"] = reply
             conversation.append((transcript, reply))
