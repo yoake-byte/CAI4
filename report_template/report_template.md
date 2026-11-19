@@ -35,7 +35,7 @@ Turns counted: 61 of 61.
 **How to recompute these numbers:** From the repository root:
 
 ```bash
-PYTHONPATH=. python3 plot_waterfall.py run_output/7147192/trace.jsonl
+PYTHONPATH=. python3 plot_waterfall.py run_output/7166576/trace.jsonl
 ```
 
 It checks every turn with `voice_kit`'s `record_problems`, prints this table with `summarize_stages`, and redraws Figure 1.
