@@ -111,13 +111,26 @@ def request_stream(
                 yield content
 
 
+# def complete_sentences(buffer: str) -> tuple[list[str], str]:
+#     parts = TTS_SENTENCE_END.split(buffer)
+#     if len(parts) == 1:
+#         return [], buffer
+#     complete = [part.strip() for part in parts[:-1] if part.strip()]
+#     return complete, parts[-1]
+
 def complete_sentences(buffer: str) -> tuple[list[str], str]:
     parts = TTS_SENTENCE_END.split(buffer)
-    if len(parts) == 1:
-        return [], buffer
     complete = [part.strip() for part in parts[:-1] if part.strip()]
-    return complete, parts[-1]
+    pending = parts[-1]
 
+    while len(pending) > 80:
+        split_at = pending.rfind(" ", 0, MAX_TTS_BUFFER_CHARS + 1)
+        if split_at <= 0:
+            break
+        complete.append(pending[:split_at].strip())
+        pending = pending[split_at:].lstrip()
+
+    return complete, pending
 
 def speak(voice: PiperVoice, text: str, sink) -> None:
     for chunk in voice.synthesize(text):
