@@ -4,7 +4,7 @@
 
 **Models:** LLM Llama 3.2 3B Instruct (`meta-llama/Llama-3.2-3B-Instruct`, served with vLLM); ASR faster-whisper small.en (`Systran/faster-whisper-small.en`, float16 on the GPU); TTS Piper, en_US lessac medium voice (on the CPU)
 
-**Run behind the figures:** PACE-ICE job 7176038; 8 CPU cores and 1 NVIDIA H100 80GB; 61 turns; trace file `run_output/7176038/trace.jsonl`
+**Run behind the figures:** PACE-ICE job 7176083; 8 CPU cores and 1 NVIDIA H100 80GB; 61 turns; trace file `run_output/7176083/trace.jsonl`
 
 ## 1. The system
 
@@ -15,7 +15,7 @@ The LLM streams its response, and completed sentences are queued to Piper’s vo
  
 ## 2. The latency waterfall
 
-![Latency waterfall, p50 over 61 turns](../run_output/7176038/waterfall.png)
+![Latency waterfall, p50 over 61 turns](../run_output/7176083/waterfall.png)
 
 *Figure 1. p50 of each stage on the TTFA path over 61 turns; the last bar is the p50 TTFA.*
 
@@ -35,7 +35,7 @@ Turns counted: 61 of 61.
 **How to recompute these numbers:** From the repository root:
 
 ```bash
-PYTHONPATH=. python3 plot_waterfall.py run_output/7176038/trace.jsonl
+PYTHONPATH=. python3 plot_waterfall.py run_output/7176083/trace.jsonl
 ```
 
 It checks every turn with `voice_kit`'s `record_problems`, prints this table with `summarize_stages`, and redraws Figure 1.
