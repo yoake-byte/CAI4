@@ -81,7 +81,7 @@ Modify the boundary definition of sentence so it triggers the TTS on commas and 
  
 
 **One thing I tried that did not help:** 
-[TODO, test further] We set max lengths of buffering text, but it broke the natural rhythm and intonation, generating very unnatural audio responses. 
+We set max length of buffering text, when the max length set is large, it does not change p50 or p90 too much, but when the meax length set is small, it breaks the natural rhythm and intonation, generating very unnatural audio responses. (like peo-ple, w-ant) 
 
 ## 5. Reproducing this
 
