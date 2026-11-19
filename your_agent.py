@@ -197,7 +197,9 @@ def make_system_prompt(knowledge_base: dict) -> str:
         "from earlier turns. Say times in words (two in the afternoon, not 14:00) and never use "
         "lists. When a ROOM CHECK or TIMERS line is given, trust it over your own reading of the "
         "knowledge base, and never read those lines out. When no room meets all constraints, "
-        "state the unmet constraint or constraints and why the closest alternative falls short.\n\nKnowledge base:\n"
+        "state the unmet constraint or constraints and why the closest alternative falls short. "
+        "If the requested time is unavailable, state that explicitly and ask before offering a different time; "
+        "never silently change the requested time or book an alternative without confirmation.\n\nKnowledge base:\n"
         + json.dumps(knowledge_base, ensure_ascii=False)
     )
 
@@ -362,7 +364,11 @@ class Booking:
         same_day = {r["name"]: r["free_hour_starts"][self.day] for r in fits if r["free_hour_starts"].get(self.day)}
         if same_day:
             free = "; ".join(f"{name} at {', '.join(say_hour(int(h[:2])) for h in hours)}" for name, hours in same_day.items())
-            return f"No room that fits is free then. Free on {self.day}: {free}. Offer these." + note
+            requested = (f"{self.day.title()} at {say_hour(self.hour)}" if self.hour is not None
+                         else f"{self.day.title()} afternoon")
+            return (f"No room that fits is available at the requested time, {requested}. "
+                    f"Other times on {self.day.title()}: {free}. Ask whether the user wants one "
+                    "of these alternative times; do not change the requested time without permission." + note)
         free = "; ".join(f"{r['name']} on {', '.join(r['free_hour_starts'])}" for r in fits)
         return f"No room that fits is free on {self.day}. {free}. Offer one of those days." + note
 
