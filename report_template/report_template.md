@@ -4,7 +4,7 @@
 
 **Models:** LLM Llama 3.2 3B Instruct (`meta-llama/Llama-3.2-3B-Instruct`, served with vLLM); ASR faster-whisper small.en (`Systran/faster-whisper-small.en`, float16 on the GPU); TTS Piper, en_US lessac medium voice (on the CPU)
 
-**Run behind the figures:** PACE-ICE job 7147192; 8 CPU cores and 1 NVIDIA H100 80GB; 61 turns; trace file `run_output/7147192/trace.jsonl`
+**Run behind the figures:** PACE-ICE job 7166576; 8 CPU cores and 1 NVIDIA H100 80GB; 61 turns; trace file `run_output/7166576/trace.jsonl`
 
 ## 1. The system
 
@@ -15,19 +15,20 @@ The LLM streams its response, and completed sentences are queued to Piper’s vo
  
 ## 2. The latency waterfall
 
-![Latency waterfall, p50 over 61 turns](../run_output/7147192/waterfall.png)
+![Latency waterfall, p50 over 61 turns](../run_output/7166576/waterfall.png)
 
 *Figure 1. p50 of each stage on the TTFA path over 61 turns; the last bar is the p50 TTFA.*
 
 | | p50 (ms) | p95 (ms) |
 |---|---|---|
-| **TTFA, all turns** |227 |336 |
-| ASR: `asr_final` minus `end_of_user_speech` |47|63 |
-| LLM start: `llm_first_token` minus `asr_final` |21 |38 |
-| Speech start: `tts_first_audio` minus `llm_first_token` |156 |263 |
-| Not on the TTFA path: `llm_complete` minus `llm_first_token` |62 |176 |
+| **TTFA, all turns** |221 |342 |
+| ASR: `asr_final` minus `end_of_user_speech` |40|56 |
+| LLM start: `llm_first_token` minus `asr_final` |19 |22 |
+| Speech start: `tts_first_audio` minus `llm_first_token` |153 |270 |
+| Not on the TTFA path: `llm_complete` minus `llm_first_token` |94 |313 |
 
 Turns counted: 61 of 61.
+
 
 **How I treat stages that overlap:** The LLM streams its reply and as soon as the first full sentence arrives, it is sent to Piper on a separate thread while the LLM keeps generating. So Speech start includes both waiting for that first sentence to finish and Piper producing its first audio. The rest of the LLM generation overlaps with speaking and is not on the TTFA path. It appears only in the last row of the table, not in the figure. The figure shows the p50 of each stage.
 
