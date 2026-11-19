@@ -152,7 +152,6 @@ def generate_reply(
     voice: PiperVoice,
     turn,
     verified_reply: str | None = None,
-    fallback_key: str = "booking_reply_fallback",
 ) -> str:
     fragments: list[str] = []
     pending = ""
@@ -186,7 +185,7 @@ def generate_reply(
             return
 
         using_fallback = True
-        turn.extras[fallback_key] = True
+        turn.extras["booking_reply_fallback"] = True
         for safe_sentence in expected_sentences[expected_index:]:
             to_speak.put(safe_sentence)
             spoken_sentences.append(safe_sentence)
@@ -211,7 +210,7 @@ def generate_reply(
             queue_sentence(pending.strip())
         if verified_reply is not None and expected_index < len(expected_sentences):
             using_fallback = True
-            turn.extras[fallback_key] = True
+            turn.extras["booking_reply_fallback"] = True
             for safe_sentence in expected_sentences[expected_index:]:
                 to_speak.put(safe_sentence)
                 spoken_sentences.append(safe_sentence)
@@ -229,18 +228,17 @@ def make_system_prompt(knowledge_base: dict) -> str:
     return (
         "You are a concise spoken assistant for the assignment's toy community center. "
         "Use only facts in the provided knowledge base; never invent facts or availability. "
-        "If a fact is absent, say you do not know. Treat timers and reminders as separate state; "
-        "never mix timers into reminder lists. Use authoritative TIMERS and REMINDERS state exactly, "
-        "without recalculating durations or inventing history. Repeat back important values, "
-        "and ask one short question when required information "
-        "is missing. For room requests, use only party-size and feature constraints the user "
-        "states; do not ask for optional constraints they have not mentioned. Use a day or time "
-        "the user specifies, and choose an available slot when either is unspecified. "
+        "If a fact is absent, say you do not know. Handle timers/reminders conversationally, "
+        "repeat back important values, and ask one short question when required information "
+        "is missing. For room requests, use only party-size, feature, day, and time constraints "
+        "the user gives; do not ask for constraints they omit. Propose the best available room "
+        "and slot that meet the stated constraints, and explain which constraints cannot be "
+        "satisfied together when no match exists. Recheck if the user adds or changes a constraint. "
         "Only propose rooms whose capacity, features, and free_hour_starts all satisfy the "
         "request. Ask for confirmation before booking, then repeat the room, day, time, and "
         "user's name. Keep answers to one or two short sentences. Preserve relevant context "
         "from earlier turns. Say times in words (two in the afternoon, not 14:00) and never use "
-        "lists. When a ROOM CHECK, TIMERS, or REMINDERS line is given, trust it over your own reading of the "
+        "lists. When a ROOM CHECK or TIMERS line is given, trust it over your own reading of the "
         "knowledge base, and never read those lines out. When no room meets all constraints, "
         "state the unmet constraint or constraints and why the closest alternative falls short. "
         "If the requested time is unavailable, say so and ask which alternative time the user wants. "
@@ -284,20 +282,7 @@ def starts_new_booking_request(transcript: str) -> bool:
 
 
 def say_hour(hour: int) -> str:
-    return say_hour_words(hour)
-
-
-def say_hour_words(hour: int) -> str:
-    words = {
-        1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
-        7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve",
-    }
-    if hour == 0:
-        return "midnight"
-    if hour == 12:
-        return "noon"
-    period = "morning" if hour < 12 else "afternoon" if hour < 17 else "evening"
-    return f"{words[hour % 12]} in the {period}"
+    return "noon" if hour == 12 else f"{hour % 12} {'am' if hour < 12 else 'pm'}"
 
 
 def natural_join(items: list[str]) -> str:
@@ -505,8 +490,7 @@ class Booking:
                 if hours:
                     matching_slots.append((r, day, hours[0]))
 
-        if matching_slots:
-            r, day, hour = matching_slots[0]
+        for r, day, hour in matching_slots:
             when = f"{day.title()} at {say_hour(hour)}"
             if self.long:
                 duration = (
@@ -520,7 +504,7 @@ class Booking:
                 )
                 return (
                     f"{r['name']} is available for one-hour bookings only. "
-                    f"Do not book for {duration}. Ask whether they want one hour instead."
+                    "Do not book three hours. Ask whether they want one hour instead."
                 )
             if self.confirmed and self.name:
                 self.done = True
@@ -555,7 +539,6 @@ class Booking:
             )
             return (f"{r['name']} on floor {r['floor']} is free on {when}, holds {r['capacity']}, has "
                     f"{', '.join(r['features'])}. Propose it and ask if they want to book it." + note)
-
         if self.day:
             same_day = {
                 r["name"]: r["free_hour_starts"][self.day]
@@ -585,22 +568,24 @@ class Booking:
                         "of these alternative times. Do not propose or book an alternative until the "
                         "user chooses a time." + note)
 
-            alternative_days = [
-                f"{r['name']} on {natural_join([day.title() for day in r['free_hour_starts']])}"
-                for r in fits if r["free_hour_starts"]
+            alternative_slots = [
+                (r, day, int(value[:2]))
+                for r in fits for day, values in r["free_hour_starts"].items() for value in values
             ]
-            alternatives = natural_join(alternative_days)
-            if alternatives:
+            if alternative_slots:
+                r, day, hour = alternative_slots[0]
                 self.verified_reply = (
                     f"No room that meets your requirements is free on {self.day.title()}. "
-                    f"{alternatives}. Which day would you prefer?"
+                    f"{r['name']} is free on {day.title()} at {say_hour(hour)}. Which day would you prefer?"
                 )
-            else:
-                self.verified_reply = (
-                    f"No room that meets your requirements is free on {self.day.title()}. "
-                    "Which other day would you like to try?"
+                return (
+                    f"No matching room is free on {self.day.title()}. "
+                    f"Offer {r['name']} on {day.title()} at {say_hour(hour)}." + note
                 )
-            return f"No room that fits is free on {self.day}. {alternatives}. Offer one of those days." + note
+            self.verified_reply = (
+                f"No room that meets your requirements is free on {self.day.title()}."
+            )
+            return f"No matching room is free on {self.day.title()}. Say that clearly." + note
 
         available_slots = [
             (r, day, int(value[:2]))
@@ -608,9 +593,7 @@ class Booking:
         ]
         if available_slots:
             r, day, hour = available_slots[0]
-            requested = (
-                f"{say_hour(self.hour)}" if self.hour is not None else "the afternoon"
-            )
+            requested = say_hour(self.hour) if self.hour is not None else "the afternoon"
             self.verified_reply = (
                 f"No room that meets your requirements is free at {requested}. "
                 f"{r['name']} is free on {day.title()} at {say_hour(hour)}. Would that work?"
@@ -692,91 +675,6 @@ class Timers:
         return " ".join(parts) or "No timers are running."
 
 
-class Reminders:
-    """Reminder state is separate from timer state and stores only user-provided reminders."""
-
-    def __init__(self) -> None:
-        self.items: list[tuple[str, str]] = []
-        self.pending_action: str | None = None
-        self.verified_reply: str | None = None
-
-    @staticmethod
-    def _time(text: str) -> tuple[str, int] | None:
-        t = plain(text)
-        match = re.search(
-            r"\b(?:noon|midnight|\d{1,2}\s*(?:am|pm)|"
-            r"\d{1,2}\s+in the (?:morning|afternoon|evening)|at\s+\d{1,2})\b",
-            t,
-        )
-        if not match:
-            return None
-        if "midnight" in match[0]:
-            hour = 0
-        else:
-            hour = read_hour(t)
-        if hour is None:
-            return None
-        return say_hour_words(hour), match.start()
-
-    def update(self, transcript: str) -> bool:
-        t = plain(transcript)
-        self.verified_reply = None
-        list_request = bool(
-            re.search(r"\b(?:what|which|list|any)\b.*\breminders?\b", t)
-            or re.search(r"\breminders?\b.*\b(?:list|do i have|are set)\b", t)
-        )
-        if list_request:
-            if not self.items:
-                self.verified_reply = "You don't have any reminders set."
-            elif len(self.items) == 1:
-                action, when = self.items[0]
-                self.verified_reply = f"You have one reminder: {action} at {when}."
-            else:
-                items = [f"{action} at {when}" for action, when in self.items]
-                self.verified_reply = (
-                    f"You have {len(items)} reminders: {natural_join(items)}."
-                )
-            return True
-
-        if self.pending_action and not re.search(r"\bremind me\b", t):
-            reminder_time = self._time(t)
-            if reminder_time:
-                when, _ = reminder_time
-                action = self.pending_action
-                self.items.append((action, when))
-                self.pending_action = None
-                self.verified_reply = f"I will remind you to {action} at {when}."
-                return True
-            return False
-
-        if not re.search(r"\bremind me\b", t):
-            return False
-
-        action_match = re.search(r"\bremind me (?:to|about) (.+)", t)
-        if not action_match:
-            self.verified_reply = "What would you like me to remind you about?"
-            return True
-
-        time_match = self._time(t)
-        action = action_match[1]
-        if time_match:
-            _, time_start = time_match
-            action = t[action_match.start(1):time_start].strip()
-            action = re.sub(r"\s+(?:at|on|by)$", "", action)
-        action = re.sub(r"\s+", " ", action).strip()
-        if not action:
-            self.verified_reply = "What would you like me to remind you about?"
-            return True
-        if time_match:
-            when, _ = time_match
-            self.items.append((action, when))
-            self.verified_reply = f"I will remind you to {action} at {when}."
-        else:
-            self.pending_action = action
-            self.verified_reply = f"At what time should I remind you to {action}?"
-        return True
-
-
 def run(args: argparse.Namespace) -> None:
     if args.cpu_count < 1:
         raise ValueError("--cpu-count must be at least 1")
@@ -830,7 +728,7 @@ def run(args: argparse.Namespace) -> None:
     )
     messages = [{"role": "system", "content": make_system_prompt(knowledge_base)}]
     conversation: list[tuple[str, str]] = []
-    booking, timers, reminders = Booking(), Timers(), Reminders()
+    booking, timers = Booking(), Timers()
 
     for turn in session.turns():
         try:
@@ -853,7 +751,7 @@ def run(args: argparse.Namespace) -> None:
                 for pair in conversation[-8:]
                 for role, content in (("user", pair[0]), ("assistant", pair[1]))
             ]
-            # Keep verified state in system messages so it takes precedence over chat history.
+            # Keep verified booking facts in a system message so they take precedence over chat history.
             booking.update(transcript, conversation[-1][1] if conversation else "", knowledge_base)
             facts = []
             if booking.active:
@@ -874,60 +772,18 @@ def run(args: argparse.Namespace) -> None:
                     "content": booking_instruction + "\n" + room_check
                     + (f"\nVERIFIED SPOKEN RESPONSE: {booking.verified_reply}" if booking.verified_reply else ""),
                 })
-            timer_turn = timers.update(transcript)
-            reminder_turn = reminders.update(transcript)
-            timer_reply = None
-            if timer_turn:
-                timer_state = timers.summary()
-                facts.append("TIMERS: " + timer_state)
-                timer_reply = (
-                    f"How long should I set the {timers.pending} timer for?"
-                    if timers.pending else timer_state
-                )
-                turn_messages.append({
-                    "role": "system",
-                    "content": (
-                        "Authoritative timer state. Do not mix it with reminders or conversation history. "
-                        "Use the verified spoken response exactly; do not recalculate durations or add timer facts."
-                        f"\nTIMERS: {timer_state}\nVERIFIED SPOKEN RESPONSE: {timer_reply}"
-                    ),
-                })
-            if reminder_turn:
-                reminder_state = (
-                    "No reminders are set."
-                    if not reminders.items else
-                    natural_join([f"{action} at {when}" for action, when in reminders.items])
-                )
-                if reminders.pending_action:
-                    reminder_state += f"; pending a time for {reminders.pending_action}."
-                facts.append("REMINDERS: " + reminder_state)
-                turn_messages.append({
-                    "role": "system",
-                    "content": (
-                        "Authoritative reminder state. Reminders are separate from timers. "
-                        "Use the verified spoken response exactly and never invent reminders or history."
-                        f"\nREMINDERS: {reminder_state}"
-                        f"\nVERIFIED SPOKEN RESPONSE: {reminders.verified_reply}"
-                    ),
-                })
+            if timers.update(transcript):
+                facts.append("TIMERS: " + timers.summary())
             turn.extras["facts"] = facts
-            turn_messages.append({"role": "user", "content": transcript})
-            verified_reply = booking.verified_reply if booking.active else None
-            if timer_turn:
-                verified_reply = timer_reply
-            if reminder_turn:
-                verified_reply = reminders.verified_reply
+            timer_facts = [fact for fact in facts if fact.startswith("TIMERS: ")]
+            turn_messages.append({"role": "user", "content": "\n\n".join([transcript] + timer_facts)})
             reply = generate_reply(
                 args.llm_base_url,
                 args.llm_model,
                 turn_messages,
                 voice,
                 turn,
-                verified_reply=verified_reply,
-                fallback_key=(
-                    "verified_reply_fallback"
-                    if timer_turn or reminder_turn else "booking_reply_fallback"
-                ),
+                verified_reply=booking.verified_reply if booking.active else None,
             )
             turn.extras["reply"] = reply
             conversation.append((transcript, reply))
