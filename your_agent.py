@@ -230,8 +230,10 @@ def make_system_prompt(knowledge_base: dict) -> str:
         "Use only facts in the provided knowledge base; never invent facts or availability. "
         "If a fact is absent, say you do not know. Handle timers/reminders conversationally, "
         "repeat back important values, and ask one short question when required information "
-        "is missing. For room requests, collect day, time, party size, and required feature; "
-        "only propose rooms whose capacity, features, and free_hour_starts all satisfy the "
+        "is missing. For room requests, use only party-size and feature constraints the user "
+        "states; do not ask for optional constraints they have not mentioned. Ask for a day or "
+        "time only when it is needed to check availability. "
+        "Only propose rooms whose capacity, features, and free_hour_starts all satisfy the "
         "request. Ask for confirmation before booking, then repeat the room, day, time, and "
         "user's name. Keep answers to one or two short sentences. Preserve relevant context "
         "from earlier turns. Say times in words (two in the afternoon, not 14:00) and never use "
@@ -339,7 +341,7 @@ class Booking:
 
     def __init__(self) -> None:
         self.active, self.day, self.hour, self.afternoon = False, None, None, False
-        self.people, self.room, self.features, self.equipment_asked = None, None, set(), False
+        self.people, self.room, self.features = None, None, set()
         self.proposed, self.confirmed, self.name, self.done, self.long = False, False, None, False, False
         self.hours = None
         self.late = False
@@ -362,7 +364,6 @@ class Booking:
         previous_constraints = (
             self.day, self.hour, self.afternoon, self.people, self.room, frozenset(self.features)
         )
-        self.equipment_asked |= "equipment" in last_reply.lower()
         self.long = bool(re.search(r"\b([2-9]|\d\d) hours\b", t))
         duration_match = re.search(r"\b(\d+) hours?\b", t)
         self.hours = int(duration_match[1]) if duration_match else None
@@ -476,13 +477,6 @@ class Booking:
             )
             return (f"No room holds {people} and has {', '.join(sorted(self.features))}. Closest: {alt['name']}, "
                     f"holds {alt['capacity']}, but has no {missing}.{when} Offer it instead." + note)
-        # Fix 4: while asking, the LLM must not name a room (it named a wrong one).
-        if self.people is None and not self.room:
-            self.verified_reply = "How many people will attend?"
-            return "Ask how many people. Do not name a room yet." + note
-        if not self.features and not self.equipment_asked and not self.room:
-            self.verified_reply = "Do you need any equipment, such as a projector or a whiteboard?"
-            return "Ask if they need any equipment, like a projector or a whiteboard. Do not name a room yet." + note
         if not self.day or (self.hour is None and not self.afternoon):
             missing = "day" if not self.day else "time"
             self.verified_reply = f"Which {missing} would you like to book the room?"
