@@ -196,7 +196,8 @@ def make_system_prompt(knowledge_base: dict) -> str:
         "user's name. Keep answers to one or two short sentences. Preserve relevant context "
         "from earlier turns. Say times in words (two in the afternoon, not 14:00) and never use "
         "lists. When a ROOM CHECK or TIMERS line is given, trust it over your own reading of the "
-        "knowledge base, and never read those lines out.\n\nKnowledge base:\n"
+        "knowledge base, and never read those lines out. When no room meets all constraints, "
+        "state the unmet constraint or constraints and why the closest alternative falls short.\n\nKnowledge base:\n"
         + json.dumps(knowledge_base, ensure_ascii=False)
     )
 
@@ -316,8 +317,17 @@ class Booking:
             big = [r for r in kb["rooms"] if r["capacity"] >= people]
             if not big:
                 largest = max(kb["rooms"], key=lambda r: r["capacity"])
-                return (f"No room holds {people}. The largest is {largest['name']}, which holds "
-                        f"{largest['capacity']}. Offer it for a smaller group." + note)
+                has = sorted(self.features & set(largest["features"]))
+                lacks = sorted(self.features - set(largest["features"]))
+                feature_status = ""
+                if has:
+                    feature_status += f" Its matching requested features are: {', '.join(has)}."
+                if lacks:
+                    feature_status += f" Its missing requested features are: {', '.join(lacks)}."
+                return (f"No room can meet both constraints: none can hold {people} people. "
+                        f"The largest is {largest['name']}, which holds {largest['capacity']}."
+                        f"{feature_status} Ask whether the user wants it for up to "
+                        f"{largest['capacity']} people or would prefer a smaller group." + note)
             # Fix 5: say what the alternative lacks, and when it is free on the day asked for.
             alt = max(big, key=lambda r: (len(self.features & set(r["features"])), -r["capacity"]))
             missing = ", ".join(sorted(self.features - set(alt["features"])))
