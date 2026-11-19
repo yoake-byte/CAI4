@@ -76,9 +76,9 @@ Speech start stage takes the largest share, TTFA(p50) = 212ms. Its own p50 is 14
 
 **Why:**
 
-For the same run, we also measured p50 and p95 for other stages (45 ms for ASR and 20 ms for LLM start), so both speech recognition and LLM initialization are completed in a short time. Also we have observed shorter response took shorter time than longer response. For example, speech start time of the response "Booked." is 45ms, but a longer response listing available rooms does not start speech until 200ms. 
+For the same run, we also measured p50 and for other stages (45 ms for ASR and 20 ms for LLM start), so both speech recognition and LLM initialization are completed in a short time. Also we have observed shorter response took shorter time than longer response. For example, speech start time of the response "Booked." is 45ms, but a longer response listing available rooms does not start speech until 200ms. 
 
-Then the reason for taking too much time between LLM first token and TTS is that LLM is generating response tokens one by one and Piper's CPU synthesis time scaling with sentence length. 
+Full LLM generation (llm_complete - llm_first_token) has a p50 of only 85 ms, so the reasons for taking too much time between LLM first token and TTS are that LLM is generating response tokens one by one and Piper's CPU synthesis time is scaling with sentence length. 
  
 
 **The fix I would ship next:** 
