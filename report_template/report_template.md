@@ -65,13 +65,13 @@ The reason might be the accent and the speed of speaking. "to" in "today" sounds
 
 **The dominant stage:**
 
-Speech start stage takes the largest share, TTFA(p50) = 227. Its own p50 is 156, and its share of the total is 156/227 = 0.687 
+Speech start stage takes the largest share, TTFA(p50) = 221. Its own p50 is 153, and its share of the total is 153/221 = 0.692 
 
  
 
 **Why:**
 
-For the same run, we also measured p50 and p95 for other stages (47 ms for ASR and 21 ms for LLM start), so both speech recognition and LLM initialization are completed in a short time. Also we have observed shorter response took shorter time than longer response. For example, speech start time of the response "Booked." Is 49ms, but a longer response listing available rooms does not start speech until 200ms. 
+For the same run, we also measured p50 and p95 for other stages (40 ms for ASR and 19 ms for LLM start), so both speech recognition and LLM initialization are completed in a short time. Also we have observed shorter response took shorter time than longer response. For example, speech start time of the response "Booked." Is 40ms, but a longer response listing available rooms does not start speech until 200ms. 
 
 Then the reason for taking too much time between LLM first token and TTS is that LLM is generating response tokens one by one like we usually observe. 
  
