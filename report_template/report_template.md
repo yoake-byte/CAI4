@@ -4,7 +4,7 @@
 
 **Models:** LLM Llama 3.2 3B Instruct (`meta-llama/Llama-3.2-3B-Instruct`, served with vLLM); ASR faster-whisper small.en (`Systran/faster-whisper-small.en`, float16 on the GPU); TTS Piper, en_US lessac medium voice (on the CPU)
 
-**Run behind the figures:** PACE-ICE job 7166576; 8 CPU cores and 1 NVIDIA H100 80GB; 61 turns; trace file `run_output/7166576/trace.jsonl`
+**Run behind the figures:** PACE-ICE job 7168346; 8 CPU cores and 1 NVIDIA H100 80GB; 61 turns; trace file `run_output/7168346/trace.jsonl`
 
 ## 1. The system
 
@@ -15,27 +15,27 @@ The LLM streams its response, and completed sentences are queued to Piper’s vo
  
 ## 2. The latency waterfall
 
-![Latency waterfall, p50 over 61 turns](../run_output/7166576/waterfall.png)
+![Latency waterfall, p50 over 61 turns](../run_output/7168346/waterfall.png)
 
 *Figure 1. p50 of each stage on the TTFA path over 61 turns; the last bar is the p50 TTFA.*
 
 | | p50 (ms) | p95 (ms) |
 |---|---|---|
-| **TTFA, all turns** |221 |342 |
-| ASR: `asr_final` minus `end_of_user_speech` |40|56 |
-| LLM start: `llm_first_token` minus `asr_final` |19 |22 |
-| Speech start: `tts_first_audio` minus `llm_first_token` |153 |270 |
-| Not on the TTFA path: `llm_complete` minus `llm_first_token` |94 |313 |
+| **TTFA, all turns** |222 |342 |
+| ASR: `asr_final` minus `end_of_user_speech` |43|57 |
+| LLM start: `llm_first_token` minus `asr_final` |20 |21 |
+| Speech start: `tts_first_audio` minus `llm_first_token` |157 |261 |
+| Not on the TTFA path: `llm_complete` minus `llm_first_token` |95 |276 |
 
 Turns counted: 61 of 61.
-
+   
 
 **How I treat stages that overlap:** The LLM streams its reply and as soon as the first full sentence arrives, it is sent to Piper on a separate thread while the LLM keeps generating. So Speech start includes both waiting for that first sentence to finish and Piper producing its first audio. The rest of the LLM generation overlaps with speaking and is not on the TTFA path. It appears only in the last row of the table, not in the figure. The figure shows the p50 of each stage.
 
 **How to recompute these numbers:** From the repository root:
 
 ```bash
-PYTHONPATH=. python3 plot_waterfall.py run_output/7166576/trace.jsonl
+PYTHONPATH=. python3 plot_waterfall.py run_output/7168346/trace.jsonl
 ```
 
 It checks every turn with `voice_kit`'s `record_problems`, prints this table with `summarize_stages`, and redraws Figure 1.
@@ -65,13 +65,14 @@ The reason might be the accent and the speed of speaking. "to" in "today" sounds
 
 **The dominant stage:**
 
-Speech start stage takes the largest share, TTFA(p50) = 221. Its own p50 is 153, and its share of the total is 153/221 = 0.692 
+
+Speech start stage takes the largest share, TTFA(p50) = 222. Its own p50 is 157, and its share of the total is 157/222 = 0.707
 
  
 
 **Why:**
 
-For the same run, we also measured p50 and p95 for other stages (40 ms for ASR and 19 ms for LLM start), so both speech recognition and LLM initialization are completed in a short time. Also we have observed shorter response took shorter time than longer response. For example, speech start time of the response "Booked." Is 40ms, but a longer response listing available rooms does not start speech until 200ms. 
+For the same run, we also measured p50 and p95 for other stages (43 ms for ASR and 20 ms for LLM start), so both speech recognition and LLM initialization are completed in a short time. Also we have observed shorter response took shorter time than longer response. For example, speech start time of the response "Booked." Is 43ms, but a longer response listing available rooms does not start speech until 200ms. 
 
 Then the reason for taking too much time between LLM first token and TTS is that LLM is generating response tokens one by one like we usually observe. 
  
