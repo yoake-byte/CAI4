@@ -8,11 +8,8 @@
 
 ## 1. The system
 
-The pipeline is ASR → LLM → TTS. 
+The pipeline is ASR → LLM → TTS. ASR waits for the full user utterance before transcribing on the GPU. The full knowledge base is provided in the system prompt, and Python state trackers compute room availability and timer math before each LLM call. We manage to reduce latency by buffering LLM text and sending the sentence to Piper when sentence boundary detected, immediately queuing each completed sentence to a Piper TTS worker thread on the CPU while the LLM continues generating the rest of the reply. Before timed turns begin, the agent warms up ASR, TTS, and the LLM (ASR: 1s silence, TTS: a dummy audio, LLM: a short “ready” response), so the initialization is outside the measured turns. 
 
-The LLM streams its response, and completed sentences are queued to Piper’s voice on CPU while generation continues. ASR waits for the full utterance, and TTS starts once the first complete sentence is available. We manage to reduce latency by buffering LLM text and sending the sentence to Piper when sentence boundary detected, which can begin speaking while the LLM continues generating. Before timing, the agent warms up ASR, TTS, and the LLM (ASR: 1s silence, TTS: a dummy synthesized audio, LLM: a short “ready” response), so the initialization is outside the measured turns. 
-
- 
 ## 2. The latency waterfall
 
 ![Latency waterfall, p50 over 61 turns](../run_output/7176083/waterfall.png)
