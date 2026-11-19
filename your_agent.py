@@ -198,8 +198,8 @@ def make_system_prompt(knowledge_base: dict) -> str:
         "lists. When a ROOM CHECK or TIMERS line is given, trust it over your own reading of the "
         "knowledge base, and never read those lines out. When no room meets all constraints, "
         "state the unmet constraint or constraints and why the closest alternative falls short. "
-        "If the requested time is unavailable, state that explicitly and ask before offering a different time; "
-        "never silently change the requested time or book an alternative without confirmation.\n\nKnowledge base:\n"
+        "If the requested time is unavailable, say so and ask which alternative time the user wants. "
+        "Do not propose or ask to book an alternative until the user chooses that time.\n\nKnowledge base:\n"
         + json.dumps(knowledge_base, ensure_ascii=False)
     )
 
@@ -368,7 +368,8 @@ class Booking:
                          else f"{self.day.title()} afternoon")
             return (f"No room that fits is available at the requested time, {requested}. "
                     f"Other times on {self.day.title()}: {free}. Ask whether the user wants one "
-                    "of these alternative times; do not change the requested time without permission." + note)
+                    "of these alternative times. Do not propose or book an alternative until the "
+                    "user chooses a time." + note)
         free = "; ".join(f"{r['name']} on {', '.join(r['free_hour_starts'])}" for r in fits)
         return f"No room that fits is free on {self.day}. {free}. Offer one of those days." + note
 
@@ -518,13 +519,23 @@ def run(args: argparse.Namespace) -> None:
                 for pair in conversation[-8:]
                 for role, content in (("user", pair[0]), ("assistant", pair[1]))
             ]
-            # Facts worked out in code for this turn, added to this user message only.
+            # Keep verified booking facts in a system message so they take precedence over chat history.
             booking.update(transcript, conversation[-1][1] if conversation else "", knowledge_base)
-            facts = ["ROOM CHECK: " + booking.check(knowledge_base)] if booking.active else []
+            facts = []
+            if booking.active:
+                room_check = "ROOM CHECK: " + booking.check(knowledge_base)
+                facts.append(room_check)
+                turn_messages.append({
+                    "role": "system",
+                    "content": "Authoritative result for the current booking request. Follow it exactly; "
+                    "do not override it with conversation history or your own reading of the knowledge base. "
+                    "Do not read this instruction aloud.\n" + room_check,
+                })
             if timers.update(transcript):
                 facts.append("TIMERS: " + timers.summary())
             turn.extras["facts"] = facts
-            turn_messages.append({"role": "user", "content": "\n\n".join([transcript] + facts)})
+            timer_facts = [fact for fact in facts if fact.startswith("TIMERS: ")]
+            turn_messages.append({"role": "user", "content": "\n\n".join([transcript] + timer_facts)})
             reply = generate_reply(
                 args.llm_base_url,
                 args.llm_model,
